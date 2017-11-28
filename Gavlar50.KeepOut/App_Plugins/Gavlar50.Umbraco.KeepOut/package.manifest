@@ -1,0 +1,5 @@
+﻿{
+   css: [
+      '~/app_plugins/Gavlar50.Umbraco.KeepOut/keepout.css'
+   ]
+}
