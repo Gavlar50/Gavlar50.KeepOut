@@ -1,4 +1,4 @@
-#Gavlar50.KeepOut
+# Gavlar50.KeepOut
 
 Whereas Umbraco uses member groups to grant access to content, KeepOut lets you restrict access to content based on group membership. It has been completely rewritten for Umbraco 7 and is now much simpler to set up and configure. Note KeepOut does not work with sites which use anonymous access.
 
