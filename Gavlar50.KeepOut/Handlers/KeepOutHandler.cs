@@ -10,6 +10,7 @@ using Gavlar50.KeepOut.Helpers;
 using Umbraco.Core.Services;
 using Umbraco.Core.Models;
 using Umbraco.Core.Events;
+using Umbraco.Core.Logging;
 
 namespace Gavlar50.Umbraco.KeepOut.Handlers
 {
@@ -30,6 +31,11 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
         private IContent KeepOutRulesFolder { get; set; }
 
         /// <summary>
+        /// The content node id of the rules folder
+        /// </summary>
+        private int KeepOutRulesFolderId { get; set; }
+
+        /// <summary>
         /// Gets or sets whether the rules are visualised in the content tree
         /// </summary>
         private bool VisualiseRules { get; set; }
@@ -41,19 +47,16 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
             UmbracoApplicationBase.ApplicationInit += UmbracoApplicationBase_ApplicationInit;
 
             // Find and store the KeepOut Rules Folder - must exist at root
-            var cs = applicationContext.Services.ContentService;
-            KeepOutRulesFolder = cs.GetRootContent().FirstOrDefault(x => x.ContentType.Alias == "keepOutSecurityRules");
-            if (KeepOutRulesFolder == null)
-            {
-            //    //TODO log here for no folder
-                return;
-            }
-
-            // Load and store the rules
-            RefreshRules();
+            KeepOutRulesFolder = applicationContext.Services.ContentService.GetRootContent().FirstOrDefault(x => x.ContentType.Alias == "keepOutSecurityRules");
+            if (KeepOutRulesFolder == null) return;
+            KeepOutRulesFolderId = KeepOutRulesFolder.Id;
+            LogHelper.Debug<KeepOutHandler>("KeepOutRulesFolderId" + KeepOutRulesFolderId.ToString());
 
             // Load and set the config
             RefreshConfig();
+
+            // Load and store the rules
+            RefreshRules();
 
             // allow us to colour the nodes on render in the backend
             TreeControllerBase.TreeNodesRendering += TreeControllerBase_TreeNodesRendering;
@@ -65,7 +68,7 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
         private void ContentService_Published(global::Umbraco.Core.Publishing.IPublishingStrategy sender, global::Umbraco.Core.Events.PublishEventArgs<global::Umbraco.Core.Models.IContent> e)
         {
             // if any rules or config were published,show the reminder message to refresh the display
-            if (e.PublishedEntities.Any(x => x.ContentType.Alias == "keepOutSecurityRule" || x.ContentType.Alias == "keepOutSecurityConfig"))
+            if (e.PublishedEntities.Any(x => x.ContentType.Alias.StartsWith("keepOutSecurityRule")))
             {
                 RefreshRules(); // ensure rules are updated on the fly
                 RefreshConfig();// likewise the config
@@ -76,6 +79,7 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
         private void TreeControllerBase_TreeNodesRendering(TreeControllerBase sender, TreeNodesRenderingEventArgs e)
         {
             if (!VisualiseRules) return;
+
             switch (sender.TreeAlias)
             {
                 case "content":
@@ -156,15 +160,19 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
             var hasRule = RulesPages.Intersect(path); 
             if (hasRule.Any())
             {
+                LogHelper.Debug<KeepOutHandler>("Access rule was found");
                 var ruleIndex = RulesPages.IndexOf(hasRule.First()); // if multiple rules overlap, take the first
                 var activeRule = Rules[ruleIndex];
 
                 // now we have found a rule we check if it applies to the current member
+                LogHelper.Debug<KeepOutHandler>("Checking member '" + context.Request.LogonUserIdentity.Name + "' for membership");
                 var memberRoles = System.Web.Security.Roles.GetRolesForUser(context.Request.LogonUserIdentity.Name).ToList();
+                LogHelper.Debug<KeepOutHandler>("Found " + memberRoles.Count() + " roles for member");
                 if (!memberRoles.Any()) return;
                 var appliesToUser = activeRule.MemberRoles.Intersect(memberRoles);
                 if (appliesToUser.Any())
                 {
+                    LogHelper.Debug<KeepOutHandler>("Applicable group membership found, attempting redirect to no-access page");
                     // member is in a group that has been denied access, so redirect to the no access page defined by the rule
                     var noAccessPage = umbracoHelper.NiceUrl(activeRule.NoAccessPage);
                     umbracoContext.HttpContext.Response.Redirect(noAccessPage);
@@ -186,6 +194,7 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
                 var keepOutRule = new KeepOutRule(rule);
                 Rules.Add(keepOutRule);
                 RulesPages.Add(keepOutRule.PageToSecure.ToString());
+                LogHelper.Debug<KeepOutHandler>("Rule was added");
             }
         }
 
@@ -194,15 +203,12 @@ namespace Gavlar50.Umbraco.KeepOut.Handlers
         /// </summary>
         private void RefreshConfig()
         {
-            var cs = ApplicationContext.Current.Services.ContentService;
-            var config = cs.GetChildren(KeepOutRulesFolder.Id).FirstOrDefault(x => x.ContentType.Alias == "keepOutSecurityConfig");
-            if (config == null)
+            VisualiseRules = false;
+            if (KeepOutRulesFolderId > 0)
             {
-                VisualiseRules = false;
-            }
-            else
-            {
+                var config = ApplicationContext.Current.Services.ContentService.GetById(KeepOutRulesFolderId);
                 VisualiseRules = config.Properties["showRuleCoverage"].Value.ToString() == "1" ? true : false;
+                LogHelper.Debug<KeepOutHandler>("KeepOut config was refreshed");
             }
         }
     }
